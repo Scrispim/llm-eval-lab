@@ -1,0 +1,9 @@
+node_modules
+.env
+results
+*.log
+.DS_Store
+
+# Skill de terceiros (MIT, da Langfuse): instale localmente em vez de versionar aqui.
+# Ver README > Instalacao.
+.claude/skills/

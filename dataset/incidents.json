@@ -1,0 +1,24 @@
+{
+  "name": "incident-rca",
+  "description": "Cenarios de incidente com causa raiz conhecida, para avaliar a acuracia de agentes de observabilidade",
+  "items": [
+    {
+      "id": "db-leaky-connections",
+      "input": {
+        "scenario": "db-leaky-connections",
+        "question": "A rota GET /students/db-leaky-connections do servico alumnus esta respondendo 500 e lenta. Investigue usando as ferramentas de observabilidade (metricas, logs e traces) e explique a causa raiz."
+      },
+      "expectedOutput": {
+        "rootCause": "O pool de conexoes do Postgres (max 2) esgota porque cada requisicao pega uma conexao e nunca a devolve (falta client.release()); a partir da 3a requisicao ocorre 'timeout exceeded when trying to connect' apos 1s.",
+        "rootCauseKeywordGroups": [
+          ["pool", "conexoes", "connection"],
+          ["timeout", "esgot", "exhaust", "saturad"],
+          ["release", "libera", "devolv", "vazamento", "vaza", "leak", "nao fecha", "nunca"]
+        ],
+        "forbiddenKeywords": ["falta de memoria", "out of memory", "oom", "disco cheio", "dns", "certificado"],
+        "expectedSignals": ["metrics", "logs", "traces"]
+      },
+      "metadata": { "difficulty": "easy", "category": "resource-leak" }
+    }
+  ]
+}
