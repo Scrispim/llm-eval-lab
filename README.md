@@ -106,6 +106,88 @@ npm run mcp:sim    # sobe o incident-sim em stdio (Ctrl+C para sair)
 | `npm run typecheck` | Checagem de tipos (`tsc --noEmit`) |
 | `npm test` | Testes (não precisam de chaves) |
 
+## Custo e limites de cota
+
+O gasto não é "uma chamada por execução". Cada investigação é um **loop**: o agente chama o modelo,
+recebe uma ferramenta para usar, chama o modelo de novo com o resultado, e assim por diante. Somam-se
+ainda as retentativas por 429/5xx, comuns em modelos `:free`.
+
+```
+requisicoes ≈ (passos + retentativas) × modelos × REPEATS
+```
+
+Medido neste projeto: uma investigação completa custa **15 a 16 requisições**.
+
+| Configuração          | Investigações | Requisições |
+| --------------------- | ------------- | ----------- |
+| 1 modelo × `REPEATS=1` | 1             | ~16         |
+| 2 modelos × `REPEATS=1`| 2             | ~32         |
+| 1 modelo × `REPEATS=2` | 2             | ~32         |
+| 2 modelos × `REPEATS=2`| 4             | ~64         |
+| 2 modelos × `REPEATS=3`| 6             | ~96         |
+
+A cota gratuita do OpenRouter é de cerca de **50 requisições por dia** (sobe para ~1000 depois de
+adicionar créditos à conta). Ou seja: no plano gratuito cabem **2 ou 3 investigações por dia**.
+Um `npm run eval` com 2 modelos × 3 repetições estoura a cota no meio e os últimos runs falham
+com `429 free-models-per-day` — sem que isso diga nada sobre a qualidade dos modelos.
+
+Por isso o `REPEATS` padrão é 2, e o mais econômico é rodar **um modelo por vez**:
+
+```bash
+MODELS=<um-modelo> REPEATS=1 npm run eval   # ~16 requisicoes, para validar o fluxo
+REPEATS=1 npm run eval                      # ~32, compara os dois modelos
+MODELS=<um-modelo> REPEATS=3 npm run eval   # ~48, mede a variancia de um modelo
+```
+
+Para distinguir "modelo ruim" de "cota estourada", filtre os traces por **Level = ERROR** e leia o
+`statusMessage`: `429 free-models-per-day` é cota, `Upstream error` é fila do provedor, e
+`sem resposta final dentro de MAX_STEPS` é o modelo se perdendo de fato.
+
+## Roteiro de estudo
+
+Na ordem, do mais barato ao mais caro. Os dois primeiros passos não gastam cota nenhuma.
+
+**1. Entender as peças — `npm test`**
+
+13 testes em menos de um segundo, sem precisar de chave. Os nomes descrevem o sistema inteiro:
+o servidor MCP simulado, os scorers, o loop do agente e a árvore de traces. É o mapa mais rápido
+do projeto.
+
+**2. Ver o que o agente vai investigar**
+
+```bash
+node -e "const f=require('./fixtures/db-leaky-connections/tools.json'); console.log([...new Set(f.entries.map(e=>e.tool))].join('\n'))"
+```
+
+As ferramentas do "Grafana falso". O gabarito — a causa raiz que o agente precisa descobrir
+sozinho — está em `dataset/incidents.json`.
+
+**3. Uma investigação, e então ler o trace** (~16 requisições)
+
+```bash
+MODELS=<um-modelo> REPEATS=1 npm run eval
+```
+
+Este é o passo que mais ensina. Abra o trace em **Tracing → Traces** e acompanhe passo a passo:
+cada `llm-call` mostra o raciocínio do modelo, cada ferramenta mostra a evidência que voltou.
+É onde se vê *por que* ele acertou ou errou, não só o placar.
+
+**4. Comparar dois modelos** (~32 requisições)
+
+```bash
+REPEATS=1 npm run eval
+```
+
+**5. Experimentar**
+
+- **Estrangular o orçamento de passos:** `MAX_STEPS=4 MODELS=<um-modelo> REPEATS=1 npm run eval`.
+  O agente fica sem fôlego no meio e falha com `sem resposta final dentro de MAX_STEPS`; no trace
+  dá para ver exatamente onde parou.
+- **Mexer no `SYSTEM_PROMPT`** em [`src/harness/agent.ts`](src/harness/agent.ts) e rodar de novo:
+  é a forma mais direta de sentir o impacto do prompt na acurácia, com número no fim em vez de achismo.
+- **Subir o `REPEATS`** para medir a variância: o mesmo modelo, com a mesma pergunta e as mesmas
+  evidências, dá respostas diferentes. É por isso que uma execução só não prova nada.
+
 ## Resultados
 
 **No terminal:** o `npm run eval` imprime a tabela por modelo (`ok`, `kw`, `judge`, `sinais`, latência p50/p95,
